@@ -36,6 +36,12 @@ export interface SegmentConfig {
   badge?: string | number;
   /** Cards rendered inside this segment (stacked vertically). */
   cards?: LovelaceCardConfig[];
+  /**
+   * Enables a responsive multi-column grid inside this segment: columns are
+   * at least this wide (px number or CSS length) and the count adapts to the
+   * card width. Overrides the card-level value. Omit for a single column.
+   */
+  min_card_width?: number | string;
 }
 
 export interface DeckCardConfig extends LovelaceCardConfig {
@@ -56,6 +62,8 @@ export interface DeckCardConfig extends LovelaceCardConfig {
   animation?: boolean;
   /** Explicit storage key for `remember` (useful for identical decks on different views). */
   key?: string;
+  /** Default responsive column width for all segments (see SegmentConfig.min_card_width). */
+  min_card_width?: number | string;
 }
 
 declare global {

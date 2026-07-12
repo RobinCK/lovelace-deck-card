@@ -20,6 +20,7 @@ const LABELS: Record<string, string> = {
   swipe: 'Swipe gestures',
   animation: 'Animations',
   default_segment: 'Default segment',
+  min_card_width: 'Min card width',
   name: 'Name',
   icon: 'Icon',
   badge: 'Badge',
@@ -29,6 +30,8 @@ const HELPERS: Record<string, string> = {
   breakpoint: 'Viewport width (px) below which "Auto" switches to dots + swipe',
   badge: 'Short static text or counter shown in the pill',
   remember: 'Reopen the segment that was active last time on this device',
+  min_card_width:
+    'Lay cards out in responsive columns at least this wide (px). Empty = single column',
 };
 
 const OPTION_DEFAULTS = {
@@ -47,6 +50,10 @@ const SEGMENT_SCHEMA: SchemaEntry[] = [
       { name: 'name', selector: { text: {} } },
       { name: 'icon', selector: { icon: {} } },
       { name: 'badge', selector: { text: {} } },
+      {
+        name: 'min_card_width',
+        selector: { number: { min: 0, max: 1200, step: 10, mode: 'box', unit_of_measurement: 'px' } },
+      },
     ],
   },
 ];
@@ -139,6 +146,7 @@ export class DeckCardEditor extends LitElement {
       swipe: config.swipe ?? OPTION_DEFAULTS.swipe,
       animation: config.animation ?? OPTION_DEFAULTS.animation,
       default_segment: config.default_segment ?? '',
+      min_card_width: config.min_card_width ?? '',
     };
   }
 
@@ -168,6 +176,12 @@ export class DeckCardEditor extends LitElement {
             name: 'breakpoint',
             selector: {
               number: { min: 200, max: 1600, step: 10, mode: 'box', unit_of_measurement: 'px' },
+            },
+          },
+          {
+            name: 'min_card_width',
+            selector: {
+              number: { min: 0, max: 1200, step: 10, mode: 'box', unit_of_measurement: 'px' },
             },
           },
           ...(named.length
@@ -213,6 +227,9 @@ export class DeckCardEditor extends LitElement {
     if (next.default_segment === '' || next.default_segment == null) {
       delete next.default_segment;
     }
+    if (!next.min_card_width) {
+      delete next.min_card_width;
+    }
     for (const [key, fallback] of Object.entries(OPTION_DEFAULTS)) {
       if ((next as Record<string, unknown>)[key] === fallback) {
         delete (next as Record<string, unknown>)[key];
@@ -237,6 +254,9 @@ export class DeckCardEditor extends LitElement {
     }
     if (updated.badge === '' || updated.badge == null) {
       delete updated.badge;
+    }
+    if (!updated.min_card_width) {
+      delete updated.min_card_width;
     }
     segments[index] = updated;
     this._emit({ ...this._config, segments });

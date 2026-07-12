@@ -169,18 +169,26 @@ export class DeckCard extends LitElement {
           class="track"
           style=${styleMap({ transform: `translateX(${factor * this._active * 100}%)` })}
         >
-          ${segments.map(
-            (segment, i) => html`
+          ${segments.map((segment, i) => {
+            const minWidth = normalizeWidth(segment.min_card_width ?? config.min_card_width);
+            return html`
               <section
-                class="panel"
+                class=${classMap({ panel: true, columns: !!minWidth })}
+                style=${styleMap(
+                  minWidth
+                    ? {
+                        'grid-template-columns': `repeat(auto-fill, minmax(min(${minWidth}, 100%), 1fr))`,
+                      }
+                    : {}
+                )}
                 role="tabpanel"
                 aria-label=${segment.name ?? `Segment ${i + 1}`}
                 ?inert=${i !== this._active}
               >
                 ${this._cards[i]?.length ? this._cards[i] : this._renderEmpty()}
               </section>
-            `
-          )}
+            `;
+          })}
         </div>
       </div>
       ${showDots ? this._renderDots(segments) : nothing}
@@ -292,7 +300,17 @@ export class DeckCard extends LitElement {
     segmentIndex: number,
     cardIndex: number
   ): LovelaceCard {
-    const element = helpers.createCardElement(cardConfig);
+    // `deck_span` is a layout hint for this container — strip it so the child
+    // card never sees an unknown option.
+    const { deck_span: span, ...childConfig } = cardConfig as LovelaceCardConfig & {
+      deck_span?: unknown;
+    };
+    const element = helpers.createCardElement(childConfig as LovelaceCardConfig);
+    if (span === 'full') {
+      element.style.gridColumn = '1 / -1';
+    } else if (typeof span === 'number' && Number.isInteger(span) && span > 1) {
+      element.style.gridColumn = `span ${span}`;
+    }
     if (this._hass) {
       element.hass = this._hass;
     }
@@ -731,6 +749,12 @@ export class DeckCard extends LitElement {
       gap: var(--deck-card-gap, 8px);
     }
 
+    .panel.columns {
+      display: grid;
+      grid-auto-flow: dense;
+      grid-auto-rows: min-content;
+    }
+
     .empty {
       display: flex;
       align-items: center;
@@ -795,6 +819,17 @@ export class DeckCard extends LitElement {
       }
     }
   `;
+}
+
+/** Accepts a px number or any CSS length; returns a CSS length or undefined. */
+function normalizeWidth(value: number | string | undefined): string | undefined {
+  if (typeof value === 'number' && value > 0) {
+    return `${value}px`;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return undefined;
 }
 
 /** djb2 string hash — stable storage keys without config noise. */

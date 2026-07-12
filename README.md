@@ -72,6 +72,7 @@ That's it — pills on desktop, swipe + dots on the phone, no extra configuratio
 | `remember` | boolean | `false` | Reopen the last active segment on this device |
 | `swipe` | boolean | `true` | Touch swiping between segments |
 | `animation` | boolean | `true` | Slide/height/indicator animations |
+| `min_card_width` | number/string | — | Lay cards out in responsive columns at least this wide (e.g. `340`). Omit for a single column |
 | `key` | string | auto | Explicit storage key for `remember` (for identical decks on different views) |
 
 ### Segment options
@@ -81,7 +82,31 @@ That's it — pills on desktop, swipe + dots on the phone, no extra configuratio
 | `name` | string | — | Pill label / accessible name |
 | `icon` | string | — | Icon shown in the pill, e.g. `mdi:sprinkler` |
 | `badge` | string/number | — | Small static counter/text in the pill |
-| `cards` | list | `[]` | Any Lovelace cards, stacked vertically |
+| `cards` | list | `[]` | Any Lovelace cards |
+| `min_card_width` | number/string | card-level value | Per-segment override of the responsive column width |
+
+### Multi-column layout
+
+By default a segment stacks its cards in one column. Set `min_card_width` (on the card, or per segment) and the segment becomes a **responsive grid**: as many columns as fit, each at least that wide — 3–4 columns on a desktop, automatically a single column on a phone. No breakpoints to configure.
+
+Any card inside a segment may take the whole row with `deck_span: full` (or span N columns with `deck_span: 2`). The option is consumed by deck-card and never reaches the child card.
+
+```yaml
+type: custom:deck-card
+min_card_width: 340
+segments:
+  - name: Sensors
+    icon: mdi:sprout
+    cards:
+      - type: custom:mushroom-entity-card   # these flow into columns
+        entity: sensor.soil_1
+      - type: custom:mushroom-entity-card
+        entity: sensor.soil_2
+      # …up to any number of sensors
+      - type: custom:mini-graph-card        # this one takes the full row
+        deck_span: full
+        entities: [sensor.soil_1, sensor.soil_2]
+```
 
 ### Navigation modes
 
