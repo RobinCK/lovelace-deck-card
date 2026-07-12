@@ -81,6 +81,13 @@ export class DeckCard extends LitElement {
 
   private _hostRO = new ResizeObserver(() => this._onHostResize());
 
+  /** Re-measures cards with `rows: auto` so they span the right number of row tracks. */
+  private _cardRO = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      this._autoSizeRows(entry.target as HTMLElement);
+    }
+  });
+
   private _mqlListener = (e: MediaQueryListEvent): void => {
     this._narrow = e.matches;
   };
@@ -154,6 +161,7 @@ export class DeckCard extends LitElement {
   public disconnectedCallback(): void {
     super.disconnectedCallback();
     this._hostRO.disconnect();
+    this._cardRO.disconnect();
     this._mql?.removeEventListener('change', this._mqlListener);
   }
 
@@ -199,6 +207,7 @@ export class DeckCard extends LitElement {
                   panel: true,
                   active: i === this._active,
                   columns: !!minWidth || sections,
+                  sections,
                 })}
                 style=${styleMap(
                   minWidth
@@ -321,6 +330,7 @@ export class DeckCard extends LitElement {
 
   private async _buildCards(config: DeckCardConfig): Promise<void> {
     const buildId = ++this._buildId;
+    this._cardRO.disconnect();
     const helpers = await window.loadCardHelpers?.();
     if (buildId !== this._buildId) {
       return;
@@ -701,21 +711,57 @@ export class DeckCard extends LitElement {
       }
       (this._cards[si] ?? []).forEach((element, ci) => {
         const cardConfig = segment.cards?.[ci] as
-          | { deck_span?: unknown; grid_options?: { columns?: number | string } }
+          | {
+              deck_span?: unknown;
+              grid_options?: { columns?: number | string; rows?: number | string };
+            }
           | undefined;
-        if (cardConfig?.deck_span) {
-          return; // explicit deck hint set at build time wins
+        if (!cardConfig?.deck_span) {
+          const columns = cardConfig?.grid_options?.columns;
+          if (columns === 'full') {
+            element.style.gridColumn = '1 / -1';
+          } else if (typeof columns === 'number' && columns > 0) {
+            element.style.gridColumn = `span ${Math.min(Math.round(columns), units)}`;
+          } else {
+            element.style.gridColumn = `span ${Math.min(GRID_UNITS_PER_COLUMN, units)}`;
+          }
         }
-        const columns = cardConfig?.grid_options?.columns;
-        if (columns === 'full') {
-          element.style.gridColumn = '1 / -1';
-        } else if (typeof columns === 'number' && columns > 0) {
-          element.style.gridColumn = `span ${Math.min(Math.round(columns), units)}`;
+        const rows = cardConfig?.grid_options?.rows;
+        if (typeof rows === 'number' && rows > 0) {
+          // Explicit height in row units, exactly like HA sections.
+          this._cardRO.unobserve(element);
+          element.style.gridRow = `span ${Math.min(Math.round(rows), 50)}`;
         } else {
-          element.style.gridColumn = `span ${Math.min(GRID_UNITS_PER_COLUMN, units)}`;
+          // rows: auto — keep the card's natural height by measuring it.
+          this._cardRO.observe(element);
+          this._autoSizeRows(element);
         }
       });
     });
+  }
+
+  /**
+   * For `rows: auto` cards in a sections-style grid: span as many fixed row
+   * tracks as the natural height needs, so thin cards stay thin next to tall
+   * ones instead of being stretched to a shared row height.
+   */
+  private _autoSizeRows(element: HTMLElement): void {
+    const panel = element.parentElement;
+    if (!panel || !panel.classList.contains('sections')) {
+      return;
+    }
+    const styles = getComputedStyle(panel);
+    const rowHeight = parseFloat(styles.getPropertyValue('--deck-card-row-height')) || 56;
+    const gap = parseFloat(styles.rowGap) || 8;
+    const height = element.getBoundingClientRect().height;
+    if (!height) {
+      return;
+    }
+    const span = Math.max(1, Math.round((height + gap) / (rowHeight + gap)));
+    const value = `span ${span}`;
+    if (element.style.gridRow !== value) {
+      element.style.gridRow = value;
+    }
   }
 
   private _syncIndicator(): void {
@@ -914,6 +960,13 @@ export class DeckCard extends LitElement {
       display: grid;
       grid-auto-flow: dense;
       grid-auto-rows: min-content;
+    }
+
+    /* Sections-style grids use fixed row tracks (like HA sections), so a
+       card's height is its row span — thin cards stay thin. */
+    .panel.sections {
+      grid-auto-rows: minmax(var(--deck-card-row-height, 56px), auto);
+      align-items: stretch;
     }
 
     .empty {

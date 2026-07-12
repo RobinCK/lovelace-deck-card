@@ -1,4 +1,4 @@
-export const CARD_VERSION = '1.3.0';
+export const CARD_VERSION = '1.4.0';
 
 /**
  * Sections-style layout: every ~350px of deck width adds one virtual

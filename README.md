@@ -95,7 +95,8 @@ Give cards the same `grid_options.columns` you already use in sections dashboard
 
 - every **~350px** of deck width = one virtual dashboard column of **12 units**, so on a 4-column-wide desktop deck `columns: 12` = quarter, `24` = half, `full` = the whole row — exactly like your sections views;
 - on narrow screens the unit count shrinks and spans clamp, so everything collapses to a single column automatically;
-- cards without `grid_options` default to 12 units; `rows` is ignored (heights stay natural).
+- **`rows` works like in sections too**: one row ≈ 56px (`--deck-card-row-height`), so `rows: 1` keeps a tile thin even next to a tall graph. Cards without `rows` keep their natural height (deck-card measures them and spans the right number of row tracks automatically);
+- cards without `grid_options` default to 12 units wide.
 
 ```yaml
 type: custom:deck-card
@@ -140,8 +141,12 @@ Alternatively set `min_card_width` (card-level or per segment) and the segment p
 
 ## Visual editor
 
-The card comes with a UI editor: title, navigation mode, breakpoint, toggles, plus adding, renaming, reordering and deleting segments (name / icon / badge).
-The `cards` inside each segment are edited in the YAML editor for now.
+The card comes with a full UI editor:
+
+- **segments as tabs** — switch, add (＋), rename, reorder and delete segments without touching YAML;
+- **per-card layout controls** — width in units, height in rows and a full-width toggle on every card (writes standard `grid_options`);
+- **native card editing** — every card opens in the same built-in HA card editor (GUI or YAML) you use everywhere else, and new cards are added through the standard card picker;
+- card reordering and deletion per segment.
 
 ## Theming
 
@@ -149,7 +154,8 @@ Fine-tune the look with CSS variables (e.g. via [card-mod](https://github.com/th
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `--deck-card-gap` | `8px` | Vertical gap between cards in a segment |
+| `--deck-card-gap` | `8px` | Gap between cards in a segment |
+| `--deck-card-row-height` | `56px` | Height of one `grid_options.rows` unit |
 | `--deck-card-duration` | `250ms` | Animation duration |
 | `--deck-card-easing` | `cubic-bezier(0.19, 1, 0.22, 1)` | Animation easing |
 | `--deck-card-nav-background` | `var(--secondary-background-color)` | Pill bar background |
