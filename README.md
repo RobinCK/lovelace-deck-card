@@ -1,7 +1,7 @@
 # Deck Card
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/v/release/RobinCK/lovelace-deck-card?include_prereleases)](https://github.com/RobinCK/lovelace-deck-card/releases)
+[![Version](https://img.shields.io/github/package-json/v/RobinCK/lovelace-deck-card?label=version&color=blue)](https://github.com/RobinCK/lovelace-deck-card)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An adaptive **segmented container card** for Home Assistant dashboards.
