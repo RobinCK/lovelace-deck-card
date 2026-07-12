@@ -22,6 +22,8 @@ const REDUCED_MOTION =
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 interface DragState {
   id: number;
   startX: number;
@@ -29,7 +31,9 @@ interface DragState {
   dx: number;
   t0: number;
   width: number;
+  height: number;
   active: boolean;
+  ready: boolean;
 }
 
 export class DeckCard extends LitElement {
@@ -50,6 +54,10 @@ export class DeckCard extends LitElement {
   @state() private _active = 0;
   @state() private _narrow = false;
   @state() private _cards: LovelaceCard[][] = [];
+  /** Set while a select animation is running — the track uses slider layout. */
+  @state() private _transition?: { from: number };
+  /** Set while a touch drag (and its settle animation) is running. */
+  @state() private _dragging = false;
 
   @query('.viewport') private _viewport?: HTMLElement;
   @query('.track') private _track?: HTMLElement;
@@ -57,17 +65,12 @@ export class DeckCard extends LitElement {
   private _hass?: HomeAssistant;
   private _drag?: DragState;
   private _suppressClick = false;
-  private _heightInit = false;
   private _indicatorInit = false;
   private _buildId = 0;
+  private _animToken = 0;
   private _mql?: MediaQueryList;
 
-  private _hostRO = new ResizeObserver(() => {
-    this._syncHeight();
-    this._syncIndicator();
-  });
-
-  private _panelRO = new ResizeObserver(() => this._syncHeight());
+  private _hostRO = new ResizeObserver(() => this._syncIndicator());
 
   private _mqlListener = (e: MediaQueryListEvent): void => {
     this._narrow = e.matches;
@@ -106,7 +109,6 @@ export class DeckCard extends LitElement {
     this._active = firstConfig
       ? this._initialIndex(config)
       : Math.min(this._active, config.segments.length - 1);
-    this._heightInit = false;
     this._indicatorInit = false;
     this.style.setProperty('--deck-card-duration', config.animation === false ? '0ms' : '');
     this._setupMedia();
@@ -139,8 +141,17 @@ export class DeckCard extends LitElement {
   public disconnectedCallback(): void {
     super.disconnectedCallback();
     this._hostRO.disconnect();
-    this._panelRO.disconnect();
     this._mql?.removeEventListener('change', this._mqlListener);
+  }
+
+  /**
+   * While idle the active panel sits in normal document flow with NO transform
+   * on any ancestor, so position:fixed dialogs opened by child cards work.
+   * Slider layout (all panels in a row + translateX) exists only during a
+   * drag or a select animation.
+   */
+  private get _animMode(): boolean {
+    return !!this._transition || this._dragging;
   }
 
   protected render(): TemplateResult | typeof nothing {
@@ -153,27 +164,24 @@ export class DeckCard extends LitElement {
     const multi = segments.length > 1;
     const showPills = multi && (nav === 'pills' || (nav === 'auto' && !this._narrow));
     const showDots = multi && (nav === 'dots' || (nav === 'auto' && this._narrow));
-    const factor = this._rtl ? 1 : -1;
+    const animMode = this._animMode;
 
     return html`
       ${config.title ? html`<h1 class="title">${config.title}</h1>` : nothing}
       ${showPills ? this._renderPills(segments) : nothing}
       <div
-        class=${classMap({ viewport: true, 'no-swipe': !this._swipeEnabled })}
+        class=${classMap({ viewport: true, anim: animMode, 'no-swipe': !this._swipeEnabled })}
         @pointerdown=${this._onPointerDown}
         @pointermove=${this._onPointerMove}
         @pointerup=${this._onPointerUp}
         @pointercancel=${this._onPointerCancel}
       >
-        <div
-          class="track"
-          style=${styleMap({ transform: `translateX(${factor * this._active * 100}%)` })}
-        >
+        <div class=${classMap({ track: true, anim: animMode })}>
           ${segments.map((segment, i) => {
             const minWidth = normalizeWidth(segment.min_card_width ?? config.min_card_width);
             return html`
               <section
-                class=${classMap({ panel: true, columns: !!minWidth })}
+                class=${classMap({ panel: true, active: i === this._active, columns: !!minWidth })}
                 style=${styleMap(
                   minWidth
                     ? {
@@ -269,8 +277,17 @@ export class DeckCard extends LitElement {
 
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
-    this._observeActivePanel();
-    this._syncHeight();
+    if (!this._animMode) {
+      // Idle: the panel is in normal flow — no leftover inline slider styles.
+      if (this._track) {
+        this._track.style.transform = '';
+        this._track.style.transition = '';
+      }
+      if (this._viewport) {
+        this._viewport.style.height = '';
+        this._viewport.style.transition = '';
+      }
+    }
     this._syncIndicator();
     if (changed.has('_active')) {
       this._scrollActivePillIntoView();
@@ -334,6 +351,15 @@ export class DeckCard extends LitElement {
     if (target === this._active) {
       return;
     }
+    const from = this._active;
+    this._commitSelect(target);
+    if (this._dragging || this._duration() <= 0) {
+      return; // a drag settles itself; zero duration switches statically
+    }
+    void this._animateTo(from, target);
+  }
+
+  private _commitSelect(target: number): void {
     this._active = target;
     if (this._config?.remember) {
       try {
@@ -344,6 +370,51 @@ export class DeckCard extends LitElement {
     }
     // Light haptic tick in the HA companion app.
     window.dispatchEvent(new CustomEvent('haptic', { detail: 'light' }));
+  }
+
+  /** Slide from one panel to another, then return to the static layout. */
+  private async _animateTo(from: number, to: number): Promise<void> {
+    const token = ++this._animToken;
+    const heightBefore = this._viewport?.offsetHeight ?? 0;
+    this._transition = { from };
+    await this.updateComplete;
+    const track = this._track;
+    const viewport = this._viewport;
+    if (!track || !viewport) {
+      if (token === this._animToken) {
+        this._transition = undefined;
+      }
+      return;
+    }
+    const factor = this._rtl ? 1 : -1;
+    track.style.transition = 'none';
+    viewport.style.transition = 'none';
+    track.style.transform = `translateX(${factor * from * 100}%)`;
+    viewport.style.height = `${heightBefore}px`;
+    void track.offsetWidth; // flush so the jump to the start position doesn't animate
+    track.style.transition = '';
+    viewport.style.transition = '';
+    track.style.transform = `translateX(${factor * to * 100}%)`;
+    const panel = this.renderRoot.querySelectorAll<HTMLElement>('.panel')[to];
+    if (panel) {
+      viewport.style.height = `${panel.offsetHeight}px`;
+    }
+    await wait(this._duration() + 60);
+    if (token === this._animToken) {
+      this._transition = undefined;
+    }
+  }
+
+  private _duration(): number {
+    if (REDUCED_MOTION) {
+      return 0;
+    }
+    const raw = getComputedStyle(this).getPropertyValue('--deck-duration').trim();
+    const value = parseFloat(raw);
+    if (!Number.isFinite(value)) {
+      return 250;
+    }
+    return raw.endsWith('ms') || !raw.endsWith('s') ? value : value * 1000;
   }
 
   private _initialIndex(config: DeckCardConfig): number {
@@ -398,8 +469,11 @@ export class DeckCard extends LitElement {
   }
 
   private _onPointerDown(e: PointerEvent): void {
-    if (e.pointerType === 'mouse' || !this._swipeEnabled || this._drag) {
+    if (e.pointerType === 'mouse' || !this._swipeEnabled) {
       return;
+    }
+    if (this._drag || this._dragging || this._transition) {
+      return; // an animation or another drag is still in flight
     }
     for (const node of e.composedPath()) {
       if (node === e.currentTarget) {
@@ -416,7 +490,9 @@ export class DeckCard extends LitElement {
       dx: 0,
       t0: performance.now(),
       width: (e.currentTarget as HTMLElement).offsetWidth || 1,
+      height: 0,
       active: false,
+      ready: false,
     };
   }
 
@@ -438,16 +514,31 @@ export class DeckCard extends LitElement {
       }
       drag.active = true;
       (e.currentTarget as HTMLElement).setPointerCapture(drag.id);
-      if (this._track) {
-        this._track.style.transition = 'none';
-      }
+      // Snapshot the idle height, then switch to slider layout and pin it.
+      drag.height = this._viewport?.offsetHeight ?? 0;
+      this._dragging = true;
+      void this.updateComplete.then(() => {
+        const current = this._drag;
+        const track = this._track;
+        const viewport = this._viewport;
+        if (!current?.active || !track || !viewport) {
+          return;
+        }
+        track.style.transition = 'none';
+        viewport.style.transition = 'none';
+        viewport.style.height = `${current.height}px`;
+        current.ready = true;
+        this._applyDragTransform(current.dx);
+      });
     }
     const count = this._config?.segments.length ?? 1;
     const step = (dx < 0 ? 1 : -1) * (this._rtl ? -1 : 1);
     const target = this._active + step;
     // Rubber-band resistance at the edges.
     drag.dx = target < 0 || target > count - 1 ? dx * 0.25 : dx;
-    this._applyTransform(drag.dx);
+    if (drag.ready) {
+      this._applyDragTransform(drag.dx);
+    }
   }
 
   private _onPointerUp(e: PointerEvent): void {
@@ -456,14 +547,13 @@ export class DeckCard extends LitElement {
       return;
     }
     this._drag = undefined;
-    if (!drag.active || !this._track) {
+    if (!drag.active) {
       return;
     }
     this._suppressClick = true;
     window.setTimeout(() => {
       this._suppressClick = false;
     }, 150);
-    this._track.style.transition = '';
     const count = this._config?.segments.length ?? 1;
     const elapsed = Math.max(1, performance.now() - drag.t0);
     const velocity = drag.dx / elapsed;
@@ -473,11 +563,7 @@ export class DeckCard extends LitElement {
       Math.abs(drag.dx) > drag.width * 0.2 ||
       (Math.abs(velocity) > 0.35 && Math.abs(drag.dx) > 24);
     const target = this._active + (shouldMove ? step : 0);
-    if (shouldMove && target >= 0 && target < count) {
-      this._select(target);
-    } else {
-      this._applyTransform(0);
-    }
+    void this._settleDrag(shouldMove && target >= 0 && target < count ? target : null);
   }
 
   private _onPointerCancel(e: PointerEvent): void {
@@ -486,13 +572,35 @@ export class DeckCard extends LitElement {
       return;
     }
     this._drag = undefined;
-    if (drag.active && this._track) {
-      this._track.style.transition = '';
-      this._applyTransform(0);
+    if (drag.active) {
+      void this._settleDrag(null);
     }
   }
 
-  private _applyTransform(offsetPx: number): void {
+  /** Animate the dragged track to its final position, then back to static layout. */
+  private async _settleDrag(target: number | null): Promise<void> {
+    if (target !== null && target !== this._active) {
+      this._commitSelect(target);
+    }
+    await this.updateComplete;
+    const track = this._track;
+    const viewport = this._viewport;
+    const duration = this._duration();
+    if (track && viewport && duration > 0) {
+      track.style.transition = '';
+      viewport.style.transition = '';
+      const factor = this._rtl ? 1 : -1;
+      track.style.transform = `translateX(${factor * this._active * 100}%)`;
+      const panel = this.renderRoot.querySelectorAll<HTMLElement>('.panel')[this._active];
+      if (panel) {
+        viewport.style.height = `${panel.offsetHeight}px`;
+      }
+      await wait(duration + 60);
+    }
+    this._dragging = false;
+  }
+
+  private _applyDragTransform(offsetPx: number): void {
     if (!this._track) {
       return;
     }
@@ -534,40 +642,6 @@ export class DeckCard extends LitElement {
   }
 
   // ------------------------------------------------------------ measurement
-
-  private _panel(index: number): HTMLElement | undefined {
-    return this.renderRoot.querySelectorAll<HTMLElement>('.panel')[index];
-  }
-
-  private _observeActivePanel(): void {
-    this._panelRO.disconnect();
-    const panel = this._panel(this._active);
-    if (panel) {
-      this._panelRO.observe(panel);
-    }
-  }
-
-  private _syncHeight(): void {
-    const viewport = this._viewport;
-    const panel = this._panel(this._active);
-    // Until child cards exist all panels share the placeholder height — leave it auto.
-    if (!viewport || !panel || !this._cards.length) {
-      return;
-    }
-    const height = panel.offsetHeight;
-    if (!height) {
-      return;
-    }
-    if (!this._heightInit) {
-      viewport.style.transition = 'none';
-      viewport.style.height = `${height}px`;
-      void viewport.offsetHeight; // flush so the transition doesn't animate the first set
-      viewport.style.transition = '';
-      this._heightInit = true;
-      return;
-    }
-    viewport.style.height = `${height}px`;
-  }
 
   private _syncIndicator(): void {
     const nav = this.renderRoot.querySelector<HTMLElement>('.pills');
@@ -723,8 +797,11 @@ export class DeckCard extends LitElement {
     /* ---------------------------------------------------------- viewport */
 
     .viewport {
-      overflow: hidden;
       touch-action: pan-y;
+    }
+
+    .viewport.anim {
+      overflow: hidden;
       transition: height var(--deck-duration) var(--deck-ease);
     }
 
@@ -732,17 +809,26 @@ export class DeckCard extends LitElement {
       touch-action: auto;
     }
 
-    .track {
-      display: flex;
-      align-items: flex-start;
-      transition: transform var(--deck-duration) var(--deck-ease);
-      will-change: transform;
+    /* Idle: only the active panel exists in flow — no transforms anywhere,
+       so position:fixed dialogs from child cards are not affected. */
+    .track:not(.anim) > .panel:not(.active) {
+      display: none;
     }
 
-    .panel {
+    .track.anim {
+      display: flex;
+      align-items: flex-start;
+      will-change: transform;
+      transition: transform var(--deck-duration) var(--deck-ease);
+    }
+
+    .track.anim > .panel {
       flex: 0 0 100%;
       width: 100%;
       min-width: 100%;
+    }
+
+    .panel {
       box-sizing: border-box;
       display: flex;
       flex-direction: column;

@@ -1,4 +1,4 @@
-export const CARD_VERSION = '1.1.0';
+export const CARD_VERSION = '1.2.0';
 export const CARD_TAG = 'deck-card';
 export const EDITOR_TAG = 'deck-card-editor';
 
