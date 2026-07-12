@@ -1,6 +1,6 @@
 {
   "name": "lovelace-deck-card",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Adaptive segmented container card for Home Assistant — segmented pills on desktop, swipe + dots on mobile",
   "keywords": [
     "home-assistant",

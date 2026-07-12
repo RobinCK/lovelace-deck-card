@@ -1,4 +1,12 @@
-export const CARD_VERSION = '1.2.0';
+export const CARD_VERSION = '1.3.0';
+
+/**
+ * Sections-style layout: every ~350px of deck width adds one virtual
+ * dashboard column of 12 grid units — mirrors how HA sections size cards,
+ * so `grid_options.columns` values keep their familiar meaning.
+ */
+export const GRID_COLUMN_WIDTH = 350;
+export const GRID_UNITS_PER_COLUMN = 12;
 export const CARD_TAG = 'deck-card';
 export const EDITOR_TAG = 'deck-card-editor';
 

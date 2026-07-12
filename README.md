@@ -87,26 +87,39 @@ That's it — pills on desktop, swipe + dots on the phone, no extra configuratio
 
 ### Multi-column layout
 
-By default a segment stacks its cards in one column. Set `min_card_width` (on the card, or per segment) and the segment becomes a **responsive grid**: as many columns as fit, each at least that wide — 3–4 columns on a desktop, automatically a single column on a phone. No breakpoints to configure.
+By default a segment stacks its cards in one column. There are two ways to get columns:
 
-Any card inside a segment may take the whole row with `deck_span: full` (or span N columns with `deck_span: 2`). The option is consumed by deck-card and never reaches the child card.
+#### 1. Native `grid_options` (recommended)
+
+Give cards the same `grid_options.columns` you already use in sections dashboards — deck-card understands it natively (HA itself ignores `grid_options` inside container cards, so deck-card re-implements the sections sizing model):
+
+- every **~350px** of deck width = one virtual dashboard column of **12 units**, so on a 4-column-wide desktop deck `columns: 12` = quarter, `24` = half, `full` = the whole row — exactly like your sections views;
+- on narrow screens the unit count shrinks and spans clamp, so everything collapses to a single column automatically;
+- cards without `grid_options` default to 12 units; `rows` is ignored (heights stay natural).
 
 ```yaml
 type: custom:deck-card
-min_card_width: 340
 segments:
   - name: Sensors
     icon: mdi:sprout
     cards:
-      - type: custom:mushroom-entity-card   # these flow into columns
+      - type: tile
         entity: sensor.soil_1
-      - type: custom:mushroom-entity-card
-        entity: sensor.soil_2
-      # …up to any number of sensors
-      - type: custom:mini-graph-card        # this one takes the full row
-        deck_span: full
-        entities: [sensor.soil_1, sensor.soil_2]
+        grid_options:
+          columns: 12          # quarter of a wide deck, full width on a phone
+      - type: custom:mini-graph-card
+        entities: [sensor.soil_1]
+        grid_options:
+          columns: 24          # half
+      - type: history-graph
+        entities: [sensor.soil_1]
+        grid_options:
+          columns: full        # whole row
 ```
+
+#### 2. `min_card_width` (auto-fill)
+
+Alternatively set `min_card_width` (card-level or per segment) and the segment packs as many equal columns as fit, each at least that wide — handy when you don't want to size cards individually. In this mode `deck_span: full` (or `deck_span: N`) on a card takes the whole row / N columns; the hint is consumed by deck-card and never reaches the child card. `min_card_width` takes precedence over `grid_options` within a segment.
 
 ### Navigation modes
 

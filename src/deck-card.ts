@@ -3,7 +3,14 @@ import type { PropertyValues, TemplateResult } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { styleMap } from 'lit/directives/style-map.js';
-import { CARD_TAG, CARD_VERSION, DEFAULT_BREAKPOINT, EDITOR_TAG } from './const';
+import {
+  CARD_TAG,
+  CARD_VERSION,
+  DEFAULT_BREAKPOINT,
+  EDITOR_TAG,
+  GRID_COLUMN_WIDTH,
+  GRID_UNITS_PER_COLUMN,
+} from './const';
 import type {
   CardHelpers,
   DeckCardConfig,
@@ -58,6 +65,8 @@ export class DeckCard extends LitElement {
   @state() private _transition?: { from: number };
   /** Set while a touch drag (and its settle animation) is running. */
   @state() private _dragging = false;
+  /** Grid units available for sections-style layout at the current width. */
+  @state() private _gridUnits = GRID_UNITS_PER_COLUMN;
 
   @query('.viewport') private _viewport?: HTMLElement;
   @query('.track') private _track?: HTMLElement;
@@ -70,7 +79,7 @@ export class DeckCard extends LitElement {
   private _animToken = 0;
   private _mql?: MediaQueryList;
 
-  private _hostRO = new ResizeObserver(() => this._syncIndicator());
+  private _hostRO = new ResizeObserver(() => this._onHostResize());
 
   private _mqlListener = (e: MediaQueryListEvent): void => {
     this._narrow = e.matches;
@@ -113,6 +122,10 @@ export class DeckCard extends LitElement {
     this.style.setProperty('--deck-card-duration', config.animation === false ? '0ms' : '');
     this._setupMedia();
     void this._buildCards(config);
+  }
+
+  public getGridOptions(): { columns: number | 'full'; rows: number | 'auto' } {
+    return { columns: 'full', rows: 'auto' };
   }
 
   public async getCardSize(): Promise<number> {
@@ -179,15 +192,24 @@ export class DeckCard extends LitElement {
         <div class=${classMap({ track: true, anim: animMode })}>
           ${segments.map((segment, i) => {
             const minWidth = normalizeWidth(segment.min_card_width ?? config.min_card_width);
+            const sections = !minWidth && this._sectionsMode(segment);
             return html`
               <section
-                class=${classMap({ panel: true, active: i === this._active, columns: !!minWidth })}
+                class=${classMap({
+                  panel: true,
+                  active: i === this._active,
+                  columns: !!minWidth || sections,
+                })}
                 style=${styleMap(
                   minWidth
                     ? {
                         'grid-template-columns': `repeat(auto-fill, minmax(min(${minWidth}, 100%), 1fr))`,
                       }
-                    : {}
+                    : sections
+                      ? {
+                          'grid-template-columns': `repeat(${this._gridUnits}, minmax(0, 1fr))`,
+                        }
+                      : {}
                 )}
                 role="tabpanel"
                 aria-label=${segment.name ?? `Segment ${i + 1}`}
@@ -289,6 +311,7 @@ export class DeckCard extends LitElement {
       }
     }
     this._syncIndicator();
+    this._applyGridSpans();
     if (changed.has('_active')) {
       this._scrollActivePillIntoView();
     }
@@ -642,6 +665,58 @@ export class DeckCard extends LitElement {
   }
 
   // ------------------------------------------------------------ measurement
+
+  private _onHostResize(): void {
+    const units =
+      GRID_UNITS_PER_COLUMN * Math.max(1, Math.floor(this.clientWidth / GRID_COLUMN_WIDTH));
+    if (units !== this._gridUnits) {
+      this._gridUnits = units;
+    }
+    this._syncIndicator();
+  }
+
+  /**
+   * A segment without min_card_width whose cards carry HA-native
+   * `grid_options` is laid out like a dashboard section: 12 grid units per
+   * ~350px of width, `grid_options.columns` spans them (rows stay natural).
+   */
+  private _sectionsMode(segment: SegmentConfig): boolean {
+    if (segment.min_card_width ?? this._config?.min_card_width) {
+      return false;
+    }
+    return (segment.cards ?? []).some(
+      (card) => !!(card as Record<string, unknown>).grid_options
+    );
+  }
+
+  private _applyGridSpans(): void {
+    const config = this._config;
+    if (!config) {
+      return;
+    }
+    const units = this._gridUnits;
+    config.segments.forEach((segment, si) => {
+      if (!this._sectionsMode(segment)) {
+        return;
+      }
+      (this._cards[si] ?? []).forEach((element, ci) => {
+        const cardConfig = segment.cards?.[ci] as
+          | { deck_span?: unknown; grid_options?: { columns?: number | string } }
+          | undefined;
+        if (cardConfig?.deck_span) {
+          return; // explicit deck hint set at build time wins
+        }
+        const columns = cardConfig?.grid_options?.columns;
+        if (columns === 'full') {
+          element.style.gridColumn = '1 / -1';
+        } else if (typeof columns === 'number' && columns > 0) {
+          element.style.gridColumn = `span ${Math.min(Math.round(columns), units)}`;
+        } else {
+          element.style.gridColumn = `span ${Math.min(GRID_UNITS_PER_COLUMN, units)}`;
+        }
+      });
+    });
+  }
 
   private _syncIndicator(): void {
     const nav = this.renderRoot.querySelector<HTMLElement>('.pills');
