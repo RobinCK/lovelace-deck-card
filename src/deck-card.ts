@@ -716,8 +716,11 @@ export class DeckCard extends LitElement {
               grid_options?: { columns?: number | string; rows?: number | string };
             }
           | undefined;
+        // The card itself may declare its preferred size (tile → rows: 1),
+        // exactly like HA sections consult it. Explicit config wins.
+        const declared = childGridOptions(element);
         if (!cardConfig?.deck_span) {
-          const columns = cardConfig?.grid_options?.columns;
+          const columns = cardConfig?.grid_options?.columns ?? declared?.columns;
           if (columns === 'full') {
             element.style.gridColumn = '1 / -1';
           } else if (typeof columns === 'number' && columns > 0) {
@@ -726,13 +729,17 @@ export class DeckCard extends LitElement {
             element.style.gridColumn = `span ${Math.min(GRID_UNITS_PER_COLUMN, units)}`;
           }
         }
-        const rows = cardConfig?.grid_options?.rows;
+        const rows = cardConfig?.grid_options?.rows ?? declared?.rows;
         if (typeof rows === 'number' && rows > 0) {
-          // Explicit height in row units, exactly like HA sections.
+          // Explicit height in row units: fill exactly N tracks, like HA sections.
           this._cardRO.unobserve(element);
           element.style.gridRow = `span ${Math.min(Math.round(rows), 50)}`;
+          element.style.alignSelf = '';
         } else {
-          // rows: auto — keep the card's natural height by measuring it.
+          // rows: auto — keep the card's NATURAL height. align-self: start is
+          // essential: with the default stretch, the measured height would be
+          // the stretched row height, locking tall spans in a feedback loop.
+          element.style.alignSelf = 'start';
           this._cardRO.observe(element);
           this._autoSizeRows(element);
         }
@@ -1033,6 +1040,24 @@ export class DeckCard extends LitElement {
       }
     }
   `;
+}
+
+/** Safely read a card element's own getGridOptions() declaration. */
+function childGridOptions(
+  element: HTMLElement
+): { columns?: number | string; rows?: number | string } | undefined {
+  const method = (element as unknown as { getGridOptions?: () => unknown }).getGridOptions;
+  if (typeof method !== 'function') {
+    return undefined;
+  }
+  try {
+    const options = method.call(element);
+    return options && typeof options === 'object'
+      ? (options as { columns?: number | string; rows?: number | string })
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Accepts a px number or any CSS length; returns a CSS length or undefined. */
